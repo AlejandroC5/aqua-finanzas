@@ -1,5 +1,5 @@
-// Aqua Finanzas — funciona sin internet
-const CACHE = 'aqua-v1';
+// Aqua Finanzas — funciona sin internet y se actualiza sola
+const CACHE = 'aqua-v2';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -8,12 +8,16 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
 });
-// Muestra lo guardado al instante y actualiza en segundo plano
+// Primero intenta la versión más nueva; sin internet (o si tarda) usa la guardada
 self.addEventListener('fetch', e => {
-  if (e.request.method !== 'GET') return;
-  e.respondWith(caches.open(CACHE).then(async c => {
-    const hit = await c.match(e.request, { ignoreSearch: true });
-    const net = fetch(e.request).then(r => { if (r.ok) c.put(e.request, r.clone()); return r; }).catch(() => hit);
-    return hit || net;
-  }));
+  const req = e.request;
+  if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
+  e.respondWith((async () => {
+    const cache = await caches.open(CACHE);
+    const net = fetch(req).then(r => { if (r.ok) cache.put(req, r.clone()); return r; });
+    const cached = await cache.match(req, { ignoreSearch: true });
+    if (!cached) return net.catch(() => cache.match('./index.html'));
+    const slow = new Promise(res => setTimeout(() => res(cached), 3000));
+    return Promise.race([net.catch(() => cached), slow]);
+  })());
 });
